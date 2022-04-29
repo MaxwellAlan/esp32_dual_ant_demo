@@ -11,7 +11,7 @@
 
 ### Support Commands
 
-- ant -d [tx|rx] -i [0|1|2] -o [0~15]
+- ant -d [tx|rx] -p [pin num] -i [0|1|2] -o [0~15]
 - scan [ssid]
 - sta ssid [password]
 - ap ssid [password]

@@ -11,8 +11,8 @@
 
 ### Support Commands
 
-- ant -i <internal ant module> -o <outside ant num>
+- ant -d [tx|rx] -i [0|1|2] -o [0~15]
 - scan [ssid]
-- sta <ssid> [password]
-- ap <ssid> [password]
+- sta ssid [password]
+- ap ssid [password]
 - query

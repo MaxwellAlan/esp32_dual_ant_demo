@@ -22,6 +22,8 @@ typedef struct {
 } wifi_scan_arg_t;
 
 typedef struct {
+    struct arg_str *dir;
+    struct arg_int *pin;
     struct arg_int *i_ant;
     struct arg_int *o_ant;
     struct arg_end *end;
@@ -270,27 +272,19 @@ static int wifi_cmd_query(int argc, char **argv)
     return 0;
 }
 
-static uint32_t wifi_get_local_ip(void)
-{
-    int bits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, 0, 1, 0);
-    esp_netif_t *netif = netif_ap;
-    esp_netif_ip_info_t ip_info;
-    wifi_mode_t mode;
+wifi_ant_gpio_config_t ant_gpio_config = {
+    // ESP32-WROOM-DA boards default antenna pins
+    .gpio_cfg[0] = { .gpio_select = 1, .gpio_num = 2 },
+    .gpio_cfg[1] = { .gpio_select = 1, .gpio_num = 25 },
+};
 
-    esp_wifi_get_mode(&mode);
-    if (WIFI_MODE_STA == mode) {
-        bits = xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, 0, 1, 0);
-        if (bits & CONNECTED_BIT) {
-            netif = netif_sta;
-        } else {
-            ESP_LOGE(TAG, "sta has no IP");
-            return 0;
-        }
-    }
-
-    esp_netif_get_ip_info(netif, &ip_info);
-    return ip_info.ip.addr;
-}
+wifi_ant_config_t ant_config = {
+    .rx_ant_mode = WIFI_ANT_MODE_ANT0,
+    .rx_ant_default = WIFI_ANT_ANT0, // only used when rx_ant_mode = auto
+    .tx_ant_mode = WIFI_ANT_MODE_ANT1,
+    .enabled_ant0 = 1, // When internal ant0 enabled, then gpio_cfg = 1 = 0b0001 -> pin 2 high level
+    .enabled_ant1 = 2  // When internal ant1 enabled, then gpio_cfg = 2 = 0b0010 -> pin 25 high level
+};
 
 static int wifi_cmd_ant(int argc, char **argv)
 {
@@ -301,28 +295,22 @@ static int wifi_cmd_ant(int argc, char **argv)
         return 0;
     }
 
-    wifi_ant_gpio_config_t ant_gpio_config = {
-        .gpio_cfg[0] = { .gpio_select = 1, .gpio_num = 16 },
-        .gpio_cfg[1] = { .gpio_select = 1, .gpio_num = 17 },
-    };
-
-    wifi_ant_config_t ant_config = {
-        .rx_ant_mode = WIFI_ANT_MODE_ANT0,
-        .rx_ant_default = WIFI_ANT_ANT0, // only used when rx_ant_mode = auto
-        .tx_ant_mode = WIFI_ANT_MODE_ANT1,
-        .enabled_ant0 = 1,
-        .enabled_ant1 = 2
-    };
-
-    ESP_LOGI(TAG, "i_ant = %d , o_ant = %d",ant_args.i_ant->ival[0], ant_args.o_ant->ival[0]);
-
-    ant_config.rx_ant_mode = ant_config.tx_ant_mode = ant_args.i_ant->ival[0] == 0 ? 0: 1;
-
-    if (ant_args.i_ant->ival[0] == 0) {
-        ant_config.enabled_ant0 = ant_args.o_ant->ival[0] == 1 ? 1 : 2;
-    } else {
-        ant_config.enabled_ant1 = ant_args.o_ant->ival[0] == 1 ? 1 : 2;
+    ESP_LOGI(TAG, "%s ant mode = %d ,pin = %d, gpio_cfg = %d",ant_args.dir->sval[0], ant_args.i_ant->ival[0], ant_args.pin->ival[0],ant_args.o_ant->ival[0]);
+ 
+    if (strcmp(ant_args.dir->sval[0],"tx") == 0) {
+        ant_config.tx_ant_mode = ant_args.i_ant->ival[0]; // 0 -> ant0, 1 -> ant 1, 2 -> auto
+        ant_gpio_config.gpio_cfg[1].gpio_num = ant_args.pin->ival[0]; // bit 1 map for tx pin
+    } else if (strcmp(ant_args.dir->sval[0],"rx") == 0) {
+        ant_config.rx_ant_mode = ant_args.i_ant->ival[0]; // 0 -> ant0, 1 -> ant 1, 2 -> auto
+        ant_gpio_config.gpio_cfg[0].gpio_num = ant_args.pin->ival[0]; // bit 0 map for rx pin
     }
+    if (ant_args.i_ant->ival[0] == 0) {
+        ant_config.enabled_ant0 = ant_args.o_ant->ival[0];
+    } else if (ant_args.i_ant->ival[0] == 1) {
+        ant_config.enabled_ant1 = ant_args.o_ant->ival[0];
+    } 
+    ESP_LOGI(TAG, "GPIO: [0].pin = %d, [1].pin = %d",ant_gpio_config.gpio_cfg[0].gpio_num, ant_gpio_config.gpio_cfg[1].gpio_num);
+    ESP_LOGI(TAG, "rx mode = %d, tx mode = %d, ant0_en = %d, ant1_en = %d",ant_config.rx_ant_mode, ant_config.tx_ant_mode, ant_config.enabled_ant0, ant_config.enabled_ant1);
 
     esp_wifi_set_ant_gpio(&ant_gpio_config);
     esp_wifi_set_ant(&ant_config);
@@ -382,8 +370,10 @@ void register_wifi(void)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&query_cmd) );
 
-    ant_args.i_ant = arg_int0("i", "i_ant", "<internal ant mode>", "config internal ant module num");
-    ant_args.o_ant = arg_int0("o", "o_ant", "<outside ant num", "config outside ant num");
+    ant_args.dir = arg_str1("d", "sir", "<direction>", "tx or rx ant config");
+    ant_args.pin = arg_int0("p","pin", "<pin num>", "ant pin num");
+    ant_args.i_ant = arg_int0("i", "i_ant", "<internal ant mode>", "config internal ant mode");
+    ant_args.o_ant = arg_int0("o", "o_ant", "<outside ant idx", "config outside ant idx");
     ant_args.end = arg_end(1);
     const esp_console_cmd_t ant_cmd = {
         .command = "ant",
